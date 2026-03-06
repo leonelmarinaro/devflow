@@ -2,12 +2,13 @@
 
 ## Descripcion
 
-Developer productivity toolkit. Monorepo con dos componentes Python independientes mas infraestructura Docker.
+Developer productivity toolkit. FastAPI como backend de automations con n8n como orquestador y PostgreSQL como persistencia. Todo corre en Docker Compose.
 
 ## Estructura
 
-- `fastapi/` - API backend (FastAPI 0.115 + Pydantic v2 + loguru)
-- `standup/` - Script standalone de Daily Standup (sin framework, usa gh CLI)
+- `fastapi/app/services/processor.py` - Action Dispatcher (registro central de acciones)
+- `fastapi/app/services/github_standup.py` - Daily Standup: GitHub REST API → Slack + Obsidian
+- `n8n/backup/` - Workflows exportados de n8n (versionados, importables via UI)
 - `docker-compose.yml` - PostgreSQL + n8n + FastAPI
 - `docs/` - Arquitectura y ADRs
 
@@ -15,29 +16,45 @@ Developer productivity toolkit. Monorepo con dos componentes Python independient
 
 - **Linter/Formatter**: ruff (configurado en pyproject.toml)
 - **Type checker**: mypy (modo gradual, ignore_missing_imports)
-- **Tests**: pytest + pytest-asyncio. Paths: `fastapi/tests/`, `standup/tests/`
+- **Tests**: pytest + pytest-asyncio. Path: `fastapi/tests/`
 - **Commits**: en espanol, imperativo, sin punto final
 - **Line length**: 100
 
 ## Comandos utiles
 
 ```bash
-make check       # lint + format-check + typecheck + test
-make test        # solo tests
-make lint        # solo ruff check
-make typecheck   # solo mypy
+make check                  # lint + format-check + typecheck + test
+make test                   # solo tests
+make lint                   # solo ruff check
+make typecheck              # solo mypy
+docker compose up -d        # levantar stack completo
+docker compose logs fastapi # ver logs de FastAPI
 ```
 
 ## Patron Action Dispatcher (FastAPI)
 
 Las acciones se registran en `fastapi/app/services/processor.py` en el dict `ACTION_HANDLERS`.
-Para agregar una accion: crear funcion async, registrarla en el dict.
-El router en `automations.py` despacha via `processor.handle(action, payload)`.
+Para agregar una accion nueva:
+1. Crear modulo en `fastapi/app/services/mi_accion.py` con funcion `async def mi_accion(payload: dict) -> dict`
+2. Importar y registrar en `processor.py`: `ACTION_HANDLERS["mi_accion"] = mi_accion`
+3. Agregar tests en `fastapi/tests/`
+4. Si tiene trigger programado, crear workflow en n8n y exportarlo a `n8n/backup/`
 
-## Daily Standup
+## Daily Standup (`github_standup.py`)
 
-- Script en `standup/daily_standup.py`
-- Usa `gh` CLI para obtener datos de GitHub (commits, PRs, issues)
-- Salida dual: Telegram (MarkdownV2) + Obsidian (Markdown)
-- Variable `DRY_RUN` se evalua a nivel modulo desde `sys.argv`
-- Tests deben mockear `sys.argv` antes de importar el modulo
+- Usa GitHub REST API con `httpx.AsyncClient` (token via `GITHUB_TOKEN`)
+- Filtra merge commits automaticamente (prefijos: "Merge pull request", "Merge branch", "Merge remote-tracking")
+- Agrupa actividad por repositorio en ambos formatos de salida
+- Salida dual: Slack Block Kit (Incoming Webhook) + Markdown para Obsidian
+- El path de Obsidian se monta como bind volume: `$OBSIDIAN_VAULT_PATH/00-Inbox:/obsidian-inbox`
+- Programado en n8n: cron `45 8 * * 1-5` (lun-vie 8:45 AM, timezone ART)
+- Los lunes extiende el rango al viernes anterior (3 dias atras)
+
+## Variables de entorno clave (root .env)
+
+Ver `.env.example`. Esenciales para las automations:
+- `GITHUB_TOKEN` - Token OAuth de GitHub (obtener con `gh auth token`)
+- `GITHUB_ORG`, `GITHUB_USERNAME` - Org y usuario a monitorear
+- `SLACK_WEBHOOK_URL` - Incoming Webhook URL de Slack
+- `OBSIDIAN_VAULT_PATH` - Ruta absoluta a vault Obsidian (solo entorno local; vaciar en VPS)
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` - Disponibles para futuros triggers

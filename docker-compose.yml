@@ -60,10 +60,21 @@ services:
     environment:
       FASTAPI_SECRET_KEY: ${FASTAPI_SECRET_KEY}
       FASTAPI_ALLOWED_ORIGINS: ${FASTAPI_ALLOWED_ORIGINS}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TIMEZONE: ${TIMEZONE}
+      # GitHub
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_ORG: ${GITHUB_ORG}
+      GITHUB_USERNAME: ${GITHUB_USERNAME}
+      # Slack
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      # Telegram (disponible para acciones futuras)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      # Obsidian: ruta interna del contenedor (mapeada via volume)
+      OBSIDIAN_INBOX_PATH: /obsidian-inbox
     volumes:
       - ./fastapi/app:/app/app
+      - ${OBSIDIAN_VAULT_PATH}/00-Inbox:/obsidian-inbox:rw
     networks:
       - automation_net
 

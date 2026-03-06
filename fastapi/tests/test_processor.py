@@ -23,3 +23,7 @@ async def test_echo_directly():
 
 def test_action_handlers_has_echo():
     assert "echo" in ACTION_HANDLERS
+
+
+def test_action_handlers_has_daily_standup():
+    assert "daily_standup" in ACTION_HANDLERS

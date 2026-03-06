@@ -8,6 +8,9 @@ Para agregar una nueva acción:
 """
 
 
+from app.services.github_standup import generate_standup
+
+
 async def echo(payload: dict) -> dict:
     """Acción de prueba: devuelve el payload recibido."""
     return {"echo": payload}
@@ -16,8 +19,7 @@ async def echo(payload: dict) -> dict:
 # Registrar acciones aquí
 ACTION_HANDLERS = {
     "echo": echo,
-    # "scrape_url": scraper.scrape,
-    # "process_document": documents.process,
+    "daily_standup": generate_standup,
 }
 
 

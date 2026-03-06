@@ -2,7 +2,7 @@
 
 ## Estado
 
-Aceptada
+Supersedida por [ADR-005](005-github-rest-api-en-docker.md)
 
 ## Contexto
 

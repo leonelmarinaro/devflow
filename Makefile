@@ -8,7 +8,7 @@ help: ## Mostrar esta ayuda
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 install: ## Instalar dependencias de desarrollo y proyecto
-	pip install -r requirements-dev.txt -r fastapi/requirements.txt -r standup/requirements.txt
+	pip install -r requirements-dev.txt -r fastapi/requirements.txt
 
 lint: ## Ejecutar ruff check
 	ruff check .
@@ -20,7 +20,7 @@ format-check: ## Verificar formato sin modificar
 	ruff format --check .
 
 typecheck: ## Ejecutar mypy
-	mypy fastapi/app standup/
+	mypy fastapi/app
 
 test: ## Ejecutar tests
 	pytest
