@@ -44,6 +44,7 @@ DRY_RUN = "--dry-run" in sys.argv
 # ---------------------------------------------------------------------------
 def load_config() -> dict:
     load_dotenv(Path(__file__).parent / ".env")
+    load_dotenv(Path(__file__).parent.parent / ".env")
     config = {
         "GITHUB_ORG": os.environ.get("GITHUB_ORG", "FARO-DataLab"),
         "GITHUB_USERNAME": os.environ.get("GITHUB_USERNAME", "leonelmarinaro"),
@@ -58,6 +59,12 @@ def load_config() -> dict:
             "/Users/lmarinaro/Documents/Obsidian/Growketing",
         ),
         "TIMEZONE": os.environ.get("TIMEZONE", "America/Argentina/Buenos_Aires"),
+        # LLM — resumen narrativo opcional (compatible OpenAI API)
+        "LLM_API_KEY": os.environ.get("LLM_API_KEY", ""),
+        "LLM_BASE_URL": os.environ.get(
+            "LLM_BASE_URL", "https://api.groq.com/openai/v1"
+        ),
+        "LLM_MODEL": os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile"),
     }
     if not DRY_RUN and not config["SLACK_WEBHOOK_URL"]:
         raise ValueError("Variable de entorno faltante: SLACK_WEBHOOK_URL")
@@ -312,9 +319,99 @@ def collect_github_data(since: datetime, config: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Helpers compartidos
+# ---------------------------------------------------------------------------
+_MERGE_PREFIXES = ("Merge pull request", "Merge branch", "Merge remote-tracking")
+
+
+def _is_merge_commit(message: str) -> bool:
+    return any(message.startswith(p) for p in _MERGE_PREFIXES)
+
+
+# ---------------------------------------------------------------------------
+# Resumen LLM (opcional)
+# ---------------------------------------------------------------------------
+def _build_llm_prompt(data: dict, period_label: str) -> str:
+    """Convierte los datos de GitHub en texto plano para el prompt del LLM."""
+    lines = [f"Periodo: {period_label}", ""]
+
+    commits = [c for c in data["commits"] if not _is_merge_commit(c["message"])]
+    lines.append(f"Commits ({len(commits)}):")
+    for c in commits:
+        lines.append(f"- {c['repo']}: {c['message']}")
+    lines.append("")
+
+    prs = data["prs_done"]
+    lines.append(f"PRs ({len(prs)}):")
+    for pr in prs:
+        lines.append(f"- [{pr['state']}] {pr['repo']}#{pr['number']}: {pr['title']}")
+    lines.append("")
+
+    issues_c = data["issues_closed"]
+    lines.append(f"Issues cerrados ({len(issues_c)}):")
+    for i in issues_c:
+        lines.append(f"- {i['repo']}#{i['number']}: {i['title']}")
+    lines.append("")
+
+    issues_o = data["issues_open"]
+    lines.append(f"Issues abiertos ({len(issues_o)}):")
+    for i in issues_o:
+        lines.append(f"- {i['repo']}#{i['number']}: {i['title']}")
+
+    return "\n".join(lines)
+
+
+def _call_llm(prompt: str, config: dict) -> str | None:
+    """Llama a la API LLM (compatible OpenAI) y retorna el resumen o None en error."""
+    url = f"{config['LLM_BASE_URL'].rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config['LLM_API_KEY']}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config["LLM_MODEL"],
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Sos un asistente que resume actividad de desarrollo en un daily standup. "
+                    "Genera un resumen narrativo en español, primera persona, 2-4 oraciones. "
+                    "No uses markdown ni bullet points. Se conciso y natural."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": 300,
+        "temperature": 0.7,
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+    except requests.RequestException as e:
+        logging.warning(f"LLM request error: {e}")
+        return None
+    except (KeyError, IndexError, ValueError) as e:
+        logging.warning(f"LLM response parse error: {e}")
+        return None
+
+
+def generate_summary(data: dict, period_label: str, config: dict) -> str | None:
+    """Genera un resumen narrativo via LLM. Retorna None si no hay API key o falla."""
+    if not config.get("LLM_API_KEY"):
+        logging.info("LLM_API_KEY no configurada, omitiendo resumen LLM")
+        return None
+    prompt = _build_llm_prompt(data, period_label)
+    return _call_llm(prompt, config)
+
+
+# ---------------------------------------------------------------------------
 # Formateo — Obsidian Markdown
 # ---------------------------------------------------------------------------
-def format_markdown(data: dict, period_label: str, today_str: str, now: datetime) -> str:
+def format_markdown(
+    data: dict, period_label: str, today_str: str, now: datetime, summary: str | None = None
+) -> str:
     weekday_es = {
         0: "lunes",
         1: "martes",
@@ -338,9 +435,20 @@ def format_markdown(data: dict, period_label: str, today_str: str, now: datetime
         "---",
         f"# Daily Standup — {today_str} ({day_name})",
         "",
+    ]
+
+    if summary:
+        lines.extend([
+            "## Resumen",
+            "",
+            summary,
+            "",
+        ])
+
+    lines.extend([
         f"## Ayer hice ({period_label})",
         "",
-    ]
+    ])
 
     # Commits
     commits = data["commits"]
@@ -409,13 +517,6 @@ def format_markdown(data: dict, period_label: str, today_str: str, now: datetime
 # ---------------------------------------------------------------------------
 # Formateo — Telegram (HTML)
 # ---------------------------------------------------------------------------
-_MERGE_PREFIXES = ("Merge pull request", "Merge branch", "Merge remote-tracking")
-
-
-def _is_merge_commit(message: str) -> bool:
-    return any(message.startswith(p) for p in _MERGE_PREFIXES)
-
-
 def _h(text: str) -> str:
     """Escapa HTML para Telegram."""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -432,7 +533,9 @@ def _group_by_repo(items: list[dict]) -> dict[str, list[dict]]:
     return result
 
 
-def format_telegram(data: dict, period_label: str, today_str: str, now: datetime) -> str:
+def format_telegram(
+    data: dict, period_label: str, today_str: str, now: datetime, summary: str | None = None
+) -> str:
     weekday_es = {
         0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
         4: "viernes", 5: "sabado", 6: "domingo",
@@ -446,6 +549,9 @@ def format_telegram(data: dict, period_label: str, today_str: str, now: datetime
         f"<b>Daily Standup \u2014 {_h(today_str)} ({_h(day_name)})</b>\n"
         f"<i>Periodo: {_h(period_label)}</i>"
     )
+
+    if summary:
+        sections.append(f"<i>{_h(summary)}</i>")
 
     # --- Ayer hice ---
     commits_real = [c for c in data["commits"] if not _is_merge_commit(c["message"])]
@@ -540,7 +646,9 @@ def _sl(text: str, url: str) -> str:
     return f"<{url}|{text}>"
 
 
-def format_slack(data: dict, period_label: str, today_str: str, now: datetime) -> list[dict]:
+def format_slack(
+    data: dict, period_label: str, today_str: str, now: datetime, summary: str | None = None
+) -> list[dict]:
     """Devuelve una lista de bloques Block Kit para Slack."""
     weekday_es = {
         0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
@@ -561,6 +669,8 @@ def format_slack(data: dict, period_label: str, today_str: str, now: datetime) -
         "text": {"type": "plain_text", "text": f"Daily Standup — {today_str} ({day_name})"},
     })
     blocks.append(section(f"_Periodo: {period_label}_"))
+    if summary:
+        blocks.append(section(f"_{summary}_"))
     blocks.append(divider())
 
     # --- Ayer hice ---
@@ -736,10 +846,17 @@ def main() -> None:
 
         data = collect_github_data(since, config)
 
-        md_content = format_markdown(data, period_label, today_str, now)
-        slack_blocks = format_slack(data, period_label, today_str, now)
+        summary = generate_summary(data, period_label, config)
+
+        md_content = format_markdown(data, period_label, today_str, now, summary=summary)
+        slack_blocks = format_slack(data, period_label, today_str, now, summary=summary)
 
         if DRY_RUN:
+            if summary:
+                print("\n" + "=" * 60)
+                print("RESUMEN LLM")
+                print("=" * 60)
+                print(summary)
             print("\n" + "=" * 60)
             print("MARKDOWN (Obsidian)")
             print("=" * 60)

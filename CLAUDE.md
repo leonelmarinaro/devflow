@@ -60,3 +60,6 @@ El router en `automations.py` despacha via `processor.handle(action, payload)`.
 - Salida dual: Slack (Block Kit) + Obsidian (Markdown)
 - Variable `DRY_RUN` se evalua a nivel modulo desde `sys.argv`
 - Tests deben mockear `sys.argv` antes de importar el modulo
+- Resumen LLM opcional: si `LLM_API_KEY` esta configurada, genera resumen narrativo via API compatible OpenAI
+- Proveedor por defecto: Groq (gratis). Cambiar con `LLM_BASE_URL` y `LLM_MODEL`
+- Sin API key, el standup funciona igual que antes (graceful degradation)
