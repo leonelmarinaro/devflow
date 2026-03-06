@@ -34,10 +34,28 @@ Las acciones se registran en `fastapi/app/services/processor.py` en el dict `ACT
 Para agregar una accion: crear funcion async, registrarla en el dict.
 El router en `automations.py` despacha via `processor.handle(action, payload)`.
 
+### Acciones registradas
+
+| Accion | Modulo | Descripcion |
+|---|---|---|
+| `echo` | `processor.py` | Test: devuelve el payload recibido |
+| `generate_invoice` | `services/invoices.py` | Genera factura PDF mensual desde plantilla .docx |
+
+## Facturacion mensual (generate_invoice)
+
+- Plantilla: `/Users/lmarinaro/Documents/Leo/Facturas/EXT - MAKE A COPY - Modelo Factura Contractor GKT.docx`
+- Output: `/Users/lmarinaro/Documents/Leo/Facturas/leonel-marinaro_YYYY-MM.pdf`
+- Edita campos `Date:` y `Due Date:` en el .docx usando `python-docx` (preserva formato de runs)
+- Convierte a PDF con LibreOffice headless (`soffice --headless --convert-to pdf`)
+- Notifica por Slack via `SLACK_WEBHOOK_URL` (env var, mismo webhook que standup)
+- Dependencia externa: `brew install --cask libreoffice`
+- Payload opcional: `date` (YYYY-MM-DD), `template_path`, `output_dir`
+- Sin payload, usa fecha = 1ro del mes actual
+
 ## Daily Standup
 
 - Script en `standup/daily_standup.py`
 - Usa `gh` CLI para obtener datos de GitHub (commits, PRs, issues)
-- Salida dual: Telegram (MarkdownV2) + Obsidian (Markdown)
+- Salida dual: Slack (Block Kit) + Obsidian (Markdown)
 - Variable `DRY_RUN` se evalua a nivel modulo desde `sys.argv`
 - Tests deben mockear `sys.argv` antes de importar el modulo
