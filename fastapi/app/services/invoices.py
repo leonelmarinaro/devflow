@@ -41,6 +41,20 @@ def _next_month(d: date) -> date:
     return d.replace(month=d.month + 1)
 
 
+def _next_invoice_number(output_dir: Path) -> str:
+    existing = list(output_dir.glob("leonel-marinaro_*.pdf"))
+    return f"INV{len(existing) + 1:06d}"
+
+
+def _update_invoice_number(doc: Document, invoice_number: str) -> None:
+    for paragraph in doc.paragraphs:
+        if paragraph.text.startswith("Invoice No:"):
+            paragraph.runs[0].text = f"Invoice No: {invoice_number}"
+            for run in paragraph.runs[1:]:
+                run.text = ""
+            break
+
+
 def _update_dates(doc: Document, invoice_date: date, due_date: date) -> None:
     for paragraph in doc.paragraphs:
         text = paragraph.text
@@ -97,8 +111,11 @@ async def generate_invoice(payload: dict) -> dict:
 
     logger.info(f"Generando factura: {output_filename} (Date: {invoice_date}, Due: {due_date})")
 
+    invoice_number = _next_invoice_number(output_dir)
+
     doc = Document(str(template))
     _update_dates(doc, invoice_date, due_date)
+    _update_invoice_number(doc, invoice_number)
 
     with TemporaryDirectory() as tmpdir:
         tmp_docx = Path(tmpdir) / "invoice.docx"
@@ -111,6 +128,7 @@ async def generate_invoice(payload: dict) -> dict:
 
     result = {
         "pdf_path": str(output_path),
+        "invoice_number": invoice_number,
         "invoice_date": str(invoice_date),
         "due_date": str(due_date),
     }
@@ -125,6 +143,7 @@ async def generate_invoice(payload: dict) -> dict:
 async def _notify_slack(webhook_url: str, result: dict) -> None:
     text = (
         f":page_facing_up: *Factura generada*\n"
+        f"- N°: `{result['invoice_number']}`\n"
         f"- Periodo: `{result['invoice_date']}` → `{result['due_date']}`\n"
         f"- Archivo: `{Path(result['pdf_path']).name}`"
     )

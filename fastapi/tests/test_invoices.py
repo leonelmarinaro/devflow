@@ -6,9 +6,11 @@ import pytest
 from docx import Document
 
 from app.services.invoices import (
+    _next_invoice_number,
     _next_month,
     _notify_slack,
     _update_dates,
+    _update_invoice_number,
     generate_invoice,
 )
 
@@ -63,6 +65,32 @@ class TestUpdateDates:
         assert p.runs[3].text == ""
 
 
+class TestInvoiceNumber:
+    def test_next_number_empty_dir(self, tmp_path):
+        assert _next_invoice_number(tmp_path) == "INV000001"
+
+    def test_next_number_with_existing_pdfs(self, tmp_path):
+        (tmp_path / "leonel-marinaro_2026-01.pdf").write_bytes(b"fake")
+        (tmp_path / "leonel-marinaro_2026-02.pdf").write_bytes(b"fake")
+        assert _next_invoice_number(tmp_path) == "INV000003"
+
+    def test_ignores_non_matching_files(self, tmp_path):
+        (tmp_path / "leonel-marinaro_2026-01.pdf").write_bytes(b"fake")
+        (tmp_path / "other-file.pdf").write_bytes(b"fake")
+        assert _next_invoice_number(tmp_path) == "INV000002"
+
+    def test_update_invoice_number_in_doc(self):
+        doc = Document()
+        p = doc.add_paragraph()
+        p.add_run("Invoice No: INV000002")
+        p.add_run("")
+
+        _update_invoice_number(doc, "INV000005")
+
+        para = next(p for p in doc.paragraphs if "Invoice No" in p.text)
+        assert para.text == "Invoice No: INV000005"
+
+
 class TestGenerateInvoice:
     @pytest.mark.asyncio
     async def test_missing_template_raises(self, tmp_path):
@@ -106,6 +134,7 @@ class TestGenerateInvoice:
                 "date": "2026-03-01",
             })
 
+        assert result["invoice_number"] == "INV000001"
         assert result["invoice_date"] == "2026-03-01"
         assert result["due_date"] == "2026-04-01"
         assert result["pdf_path"].endswith("leonel-marinaro_2026-03.pdf")
@@ -152,6 +181,7 @@ class TestSlackNotification:
     async def test_sends_slack_message(self):
         result = {
             "pdf_path": "/tmp/leonel-marinaro_2026-03.pdf",
+            "invoice_number": "INV000003",
             "invoice_date": "2026-03-01",
             "due_date": "2026-04-01",
         }
