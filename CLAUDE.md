@@ -45,7 +45,8 @@ El router en `automations.py` despacha via `processor.handle(action, payload)`.
 
 - Plantilla: `/Users/lmarinaro/Documents/Leo/Facturas/EXT - MAKE A COPY - Modelo Factura Contractor GKT.docx`
 - Output: `/Users/lmarinaro/Documents/Leo/Facturas/leonel-marinaro_YYYY-MM.pdf`
-- Edita campos `Date:` y `Due Date:` en el .docx usando `python-docx` (preserva formato de runs)
+- Edita campos `Date:`, `Due Date:` e `Invoice No:` en el .docx usando `python-docx` (preserva formato de runs)
+- Invoice No se auto-incrementa contando PDFs existentes en output dir (INV000001, INV000002, ...)
 - Convierte a PDF con LibreOffice headless (`soffice --headless --convert-to pdf`)
 - Notifica por Slack via `SLACK_WEBHOOK_URL` (env var, mismo webhook que standup)
 - Dependencia externa: `brew install --cask libreoffice`

@@ -20,6 +20,8 @@ Action Dispatcher: el endpoint `/api/automations/process` recibe `{action, paylo
 Genera factura PDF mensual. Flujo: plantilla .docx → editar fechas con python-docx → PDF con LibreOffice headless → notificar Slack.
 
 - `_update_dates()`: reemplaza runs en parrafos `Date:` y `Due Date:` (cuidado: docx fragmenta texto en multiples runs)
+- `_update_invoice_number()`: reemplaza `Invoice No:` con numero auto-incrementado
+- `_next_invoice_number()`: cuenta `leonel-marinaro_*.pdf` en output dir + 1, formato `INV000XXX`
 - `_convert_to_pdf()`: usa soffice headless, busca en `/Applications/LibreOffice.app/` o PATH
 - `_notify_slack()`: POST async a webhook con httpx
 - Env var requerida para Slack: `SLACK_WEBHOOK_URL`
