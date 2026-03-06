@@ -40,6 +40,14 @@ Para agregar una accion nueva:
 3. Agregar tests en `fastapi/tests/`
 4. Si tiene trigger programado, crear workflow en n8n y exportarlo a `n8n/backup/`
 
+### Acciones registradas
+
+| Accion | Modulo | Descripcion |
+|---|---|---|
+| `echo` | `processor.py` | Test: devuelve el payload recibido |
+| `github_standup` | `services/github_standup.py` | Daily Standup: GitHub REST API → Slack + Obsidian |
+| `generate_invoice` | `services/invoices.py` | Genera factura PDF mensual desde plantilla .docx |
+
 ## Daily Standup (`github_standup.py`)
 
 - Usa GitHub REST API con `httpx.AsyncClient` (token via `GITHUB_TOKEN`)
@@ -49,6 +57,18 @@ Para agregar una accion nueva:
 - El path de Obsidian se monta como bind volume: `$OBSIDIAN_VAULT_PATH/00-Inbox:/obsidian-inbox`
 - Programado en n8n: cron `45 8 * * 1-5` (lun-vie 8:45 AM, timezone ART)
 - Los lunes extiende el rango al viernes anterior (3 dias atras)
+
+## Facturacion mensual (generate_invoice)
+
+- Plantilla: `/Users/lmarinaro/Documents/Leo/Facturas/EXT - MAKE A COPY - Modelo Factura Contractor GKT.docx`
+- Output: `/Users/lmarinaro/Documents/Leo/Facturas/leonel-marinaro_YYYY-MM.pdf`
+- Edita campos `Date:`, `Due Date:` e `Invoice No:` en el .docx usando `python-docx` (preserva formato de runs)
+- Invoice No se auto-incrementa contando PDFs existentes en output dir (INV000001, INV000002, ...)
+- Convierte a PDF con LibreOffice headless (`soffice --headless --convert-to pdf`)
+- Notifica por Slack via `SLACK_WEBHOOK_URL` (env var, mismo webhook que standup)
+- Dependencia externa: `brew install --cask libreoffice`
+- Payload opcional: `date` (YYYY-MM-DD), `template_path`, `output_dir`
+- Sin payload, usa fecha = 1ro del mes actual
 
 ## Variables de entorno clave (root .env)
 

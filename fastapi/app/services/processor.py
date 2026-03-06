@@ -9,6 +9,7 @@ Para agregar una nueva acción:
 
 
 from app.services.github_standup import generate_standup
+from app.services.invoices import generate_invoice
 
 
 async def echo(payload: dict) -> dict:
@@ -20,6 +21,7 @@ async def echo(payload: dict) -> dict:
 ACTION_HANDLERS = {
     "echo": echo,
     "daily_standup": generate_standup,
+    "generate_invoice": generate_invoice,
 }
 
 
