@@ -61,9 +61,13 @@ services:
       FASTAPI_SECRET_KEY: ${FASTAPI_SECRET_KEY}
       FASTAPI_ALLOWED_ORIGINS: ${FASTAPI_ALLOWED_ORIGINS}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      INVOICE_TEMPLATE_PATH: /facturas/EXT - MAKE A COPY - Modelo Factura Contractor GKT.docx
+      INVOICE_OUTPUT_DIR: /facturas
       TIMEZONE: ${TIMEZONE}
     volumes:
       - ./fastapi/app:/app/app
+      - ${INVOICE_HOST_DIR:-/Users/lmarinaro/Documents/Leo/Facturas}:/facturas
     networks:
       - automation_net
 

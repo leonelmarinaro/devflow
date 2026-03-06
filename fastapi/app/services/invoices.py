@@ -11,11 +11,15 @@ import httpx
 from docx import Document
 from loguru import logger
 
-TEMPLATE_PATH = Path(
+TEMPLATE_PATH = Path(os.environ.get(
+    "INVOICE_TEMPLATE_PATH",
     "/Users/lmarinaro/Documents/Leo/Facturas/"
-    "EXT - MAKE A COPY - Modelo Factura Contractor GKT.docx"
-)
-OUTPUT_DIR = Path("/Users/lmarinaro/Documents/Leo/Facturas")
+    "EXT - MAKE A COPY - Modelo Factura Contractor GKT.docx",
+))
+OUTPUT_DIR = Path(os.environ.get(
+    "INVOICE_OUTPUT_DIR",
+    "/Users/lmarinaro/Documents/Leo/Facturas",
+))
 
 SOFFICE_PATHS = [
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
