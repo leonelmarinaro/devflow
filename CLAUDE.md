@@ -1,8 +1,8 @@
-# Automations - Guia para Claude
+# devflow - Guia para Claude
 
 ## Descripcion
 
-Sistema de automaciones personales. Monorepo con dos componentes Python independientes mas infraestructura Docker.
+Developer productivity toolkit. Monorepo con dos componentes Python independientes mas infraestructura Docker.
 
 ## Estructura
 

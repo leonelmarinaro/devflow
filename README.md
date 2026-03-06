@@ -1,6 +1,6 @@
-# Automations
+# devflow
 
-![CI](https://github.com/leonelmarinaro/automations/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/leonelmarinaro/devflow/actions/workflows/ci.yml/badge.svg)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)
 ![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)
@@ -8,7 +8,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)
 
-Sistema de automaciones personales con FastAPI, n8n y scripts de productividad.
+Developer productivity toolkit: automaciones, workflows y herramientas de desarrollo con FastAPI, n8n y scripts de productividad.
 
 ## Arquitectura
 
@@ -31,8 +31,8 @@ Ver [docs/architecture.md](docs/architecture.md) para el diagrama completo.
 
 ```bash
 # Clonar el repositorio
-git clone https://github.com/leonelmarinaro/automations.git
-cd automations
+git clone https://github.com/leonelmarinaro/devflow.git
+cd devflow
 
 # Copiar variables de entorno
 cp .env.example .env
@@ -65,7 +65,7 @@ make test-cov      # pytest con cobertura
 ## Estructura del proyecto
 
 ```
-automations/
+devflow/
 ├── fastapi/               # Backend API
 │   ├── app/
 │   │   ├── main.py        # App FastAPI + health endpoint

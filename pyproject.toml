@@ -1,7 +1,7 @@
 [project]
-name = "automations"
+name = "devflow"
 version = "0.1.0"
-description = "Sistema de automaciones con FastAPI, n8n y scripts de productividad"
+description = "Developer productivity toolkit con FastAPI, n8n y scripts de productividad"
 requires-python = ">=3.12"
 
 [tool.ruff]
