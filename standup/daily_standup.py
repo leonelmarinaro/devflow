@@ -58,11 +58,7 @@ def load_config() -> dict:
         "TIMEZONE": os.environ.get("TIMEZONE", "America/Argentina/Buenos_Aires"),
     }
     if not DRY_RUN:
-        missing = [
-            k
-            for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
-            if not config[k]
-        ]
+        missing = [k for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") if not config[k]]
         if missing:
             raise ValueError(f"Variables de entorno faltantes: {missing}")
     return config
@@ -71,9 +67,9 @@ def load_config() -> dict:
 # ---------------------------------------------------------------------------
 # Calculo del rango de fechas
 # ---------------------------------------------------------------------------
-def get_date_range(tz_name: str) -> tuple[datetime, str, str]:
+def get_date_range(tz_name: str) -> tuple[datetime, str, str, datetime]:
     """
-    Devuelve (since_dt, period_label, today_str).
+    Devuelve (since_dt, period_label, today_str, now).
     - Lunes: desde el viernes anterior (3 dias atras)
     - Resto: desde ayer
     """
@@ -96,7 +92,7 @@ def get_date_range(tz_name: str) -> tuple[datetime, str, str]:
 # ---------------------------------------------------------------------------
 def run_gh(args: list[str], gh_bin: str) -> list[dict]:
     """Llama gh CLI y devuelve lista parseada de JSON. Devuelve [] en error."""
-    cmd = [gh_bin] + args
+    cmd = [gh_bin, *args]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
@@ -104,7 +100,7 @@ def run_gh(args: list[str], gh_bin: str) -> list[dict]:
             return []
         if not result.stdout.strip():
             return []
-        return json.loads(result.stdout)
+        return json.loads(result.stdout)  # type: ignore[no-any-return]
     except subprocess.TimeoutExpired:
         logging.error(f"Timeout ejecutando: {' '.join(cmd)}")
         return []
@@ -122,14 +118,20 @@ def collect_github_data(since: datetime, config: dict) -> dict:
     logging.info(f"Recolectando datos de GitHub org={org} desde={since_str}")
 
     # 1. Commits propios
-    commits_raw = run_gh([
-        "search", "commits",
-        f"--author={username}",
-        f"--owner={org}",
-        f"--author-date=>={since_str}",
-        "--json", "sha,repository,commit",
-        "--limit", "50",
-    ], gh)
+    commits_raw = run_gh(
+        [
+            "search",
+            "commits",
+            f"--author={username}",
+            f"--owner={org}",
+            f"--author-date=>={since_str}",
+            "--json",
+            "sha,repository,commit",
+            "--limit",
+            "50",
+        ],
+        gh,
+    )
 
     commits = []
     for c in commits_raw:
@@ -140,38 +142,53 @@ def collect_github_data(since: datetime, config: dict) -> dict:
                 dt = datetime.fromisoformat(author_date)
                 if dt.tzinfo is None:
                     from zoneinfo import ZoneInfo
+
                     dt = dt.replace(tzinfo=ZoneInfo("UTC"))
                 if dt >= since:
                     msg_lines = c.get("commit", {}).get("message", "").split("\n")
-                    commits.append({
-                        "repo": c.get("repository", {}).get("name", ""),
-                        "message": msg_lines[0].strip(),
-                        "sha": c.get("sha", "")[:7],
-                        "date": author_date,
-                    })
+                    commits.append(
+                        {
+                            "repo": c.get("repository", {}).get("name", ""),
+                            "message": msg_lines[0].strip(),
+                            "sha": c.get("sha", "")[:7],
+                            "date": author_date,
+                        }
+                    )
             except ValueError:
                 pass
 
     # 2. PRs propios creados/actualizados en el periodo
-    prs_own_raw = run_gh([
-        "search", "prs",
-        f"--author={username}",
-        f"--owner={org}",
-        f"--created=>={since_str}",
-        "--json", "number,title,state,repository,createdAt,closedAt,url",
-        "--limit", "30",
-    ], gh)
+    prs_own_raw = run_gh(
+        [
+            "search",
+            "prs",
+            f"--author={username}",
+            f"--owner={org}",
+            f"--created=>={since_str}",
+            "--json",
+            "number,title,state,repository,createdAt,closedAt,url",
+            "--limit",
+            "30",
+        ],
+        gh,
+    )
 
     # Tambien buscar PRs mergeados antes (closed en el periodo)
-    prs_merged_raw = run_gh([
-        "search", "prs",
-        f"--author={username}",
-        f"--owner={org}",
-        "--state=closed",
-        f"--closed=>={since_str}",
-        "--json", "number,title,state,repository,createdAt,closedAt,url",
-        "--limit", "30",
-    ], gh)
+    prs_merged_raw = run_gh(
+        [
+            "search",
+            "prs",
+            f"--author={username}",
+            f"--owner={org}",
+            "--state=closed",
+            f"--closed=>={since_str}",
+            "--json",
+            "number,title,state,repository,createdAt,closedAt,url",
+            "--limit",
+            "30",
+        ],
+        gh,
+    )
 
     # Deduplicar por numero+repo
     seen_prs = set()
@@ -180,26 +197,34 @@ def collect_github_data(since: datetime, config: dict) -> dict:
         key = (pr.get("number"), pr.get("repository", {}).get("name"))
         if key not in seen_prs:
             seen_prs.add(key)
-            prs_done.append({
-                "number": pr.get("number"),
-                "title": pr.get("title", ""),
-                "state": pr.get("state", ""),
-                "repo": pr.get("repository", {}).get("name", ""),
-                "url": pr.get("url", ""),
-                "created_at": pr.get("createdAt", ""),
-                "closed_at": pr.get("closedAt", ""),
-            })
+            prs_done.append(
+                {
+                    "number": pr.get("number"),
+                    "title": pr.get("title", ""),
+                    "state": pr.get("state", ""),
+                    "repo": pr.get("repository", {}).get("name", ""),
+                    "url": pr.get("url", ""),
+                    "created_at": pr.get("createdAt", ""),
+                    "closed_at": pr.get("closedAt", ""),
+                }
+            )
 
     # 3. Issues cerrados por el usuario en el periodo
-    issues_closed_raw = run_gh([
-        "search", "issues",
-        f"--owner={org}",
-        f"--author={username}",
-        "--state=closed",
-        f"--closed=>={since_str}",
-        "--json", "number,title,repository,closedAt,url",
-        "--limit", "20",
-    ], gh)
+    issues_closed_raw = run_gh(
+        [
+            "search",
+            "issues",
+            f"--owner={org}",
+            f"--author={username}",
+            "--state=closed",
+            f"--closed=>={since_str}",
+            "--json",
+            "number,title,repository,closedAt,url",
+            "--limit",
+            "20",
+        ],
+        gh,
+    )
 
     issues_closed = [
         {
@@ -212,13 +237,19 @@ def collect_github_data(since: datetime, config: dict) -> dict:
     ]
 
     # 4. PRs abiertos de la org para revisar (excluyendo los propios)
-    prs_open_raw = run_gh([
-        "search", "prs",
-        f"--owner={org}",
-        "--state=open",
-        "--json", "number,title,repository,author,createdAt,url",
-        "--limit", "20",
-    ], gh)
+    prs_open_raw = run_gh(
+        [
+            "search",
+            "prs",
+            f"--owner={org}",
+            "--state=open",
+            "--json",
+            "number,title,repository,author,createdAt,url",
+            "--limit",
+            "20",
+        ],
+        gh,
+    )
 
     prs_to_review = [
         {
@@ -233,14 +264,20 @@ def collect_github_data(since: datetime, config: dict) -> dict:
     ]
 
     # 5. Issues abiertos asignados al usuario
-    issues_open_raw = run_gh([
-        "search", "issues",
-        f"--owner={org}",
-        f"--involves={username}",
-        "--state=open",
-        "--json", "number,title,repository,url,assignees",
-        "--limit", "20",
-    ], gh)
+    issues_open_raw = run_gh(
+        [
+            "search",
+            "issues",
+            f"--owner={org}",
+            f"--involves={username}",
+            "--state=open",
+            "--json",
+            "number,title,repository,url,assignees",
+            "--limit",
+            "20",
+        ],
+        gh,
+    )
 
     issues_open = []
     seen_issues = set()
@@ -250,12 +287,14 @@ def collect_github_data(since: datetime, config: dict) -> dict:
         key = (num, repo)
         if key not in seen_issues:
             seen_issues.add(key)
-            issues_open.append({
-                "number": num,
-                "title": i.get("title", ""),
-                "repo": repo,
-                "url": i.get("url", ""),
-            })
+            issues_open.append(
+                {
+                    "number": num,
+                    "title": i.get("title", ""),
+                    "repo": repo,
+                    "url": i.get("url", ""),
+                }
+            )
 
     logging.info(
         f"Datos: {len(commits)} commits, {len(prs_done)} PRs propios, "
@@ -277,8 +316,13 @@ def collect_github_data(since: datetime, config: dict) -> dict:
 # ---------------------------------------------------------------------------
 def format_markdown(data: dict, period_label: str, today_str: str, now: datetime) -> str:
     weekday_es = {
-        0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
-        4: "viernes", 5: "sabado", 6: "domingo",
+        0: "lunes",
+        1: "martes",
+        2: "miercoles",
+        3: "jueves",
+        4: "viernes",
+        5: "sabado",
+        6: "domingo",
     }
     day_name = weekday_es.get(now.weekday(), "")
     timestamp = now.strftime("%Y-%m-%d %H:%M ART")
@@ -314,7 +358,9 @@ def format_markdown(data: dict, period_label: str, today_str: str, now: datetime
     if prs:
         for pr in prs:
             estado = pr["state"].upper()
-            lines.append(f"- [{estado}] [#{pr['number']} {pr['title']}]({pr['url']}) — `{pr['repo']}`")
+            lines.append(
+                f"- [{estado}] [#{pr['number']} {pr['title']}]({pr['url']}) — `{pr['repo']}`"
+            )
     else:
         lines.append("_Sin PRs en el periodo._")
     lines.append("")
@@ -337,7 +383,9 @@ def format_markdown(data: dict, period_label: str, today_str: str, now: datetime
     lines.append(f"### PRs abiertos de la org ({len(prs_rev)})")
     if prs_rev:
         for pr in prs_rev:
-            lines.append(f"- [#{pr['number']} {pr['title']}]({pr['url']}) — `{pr['repo']}` (@{pr['author']})")
+            lines.append(
+                f"- [#{pr['number']} {pr['title']}]({pr['url']}) — `{pr['repo']}` (@{pr['author']})"
+            )
     else:
         lines.append("_Sin PRs abiertos de otros en la org._")
     lines.append("")
@@ -371,8 +419,13 @@ def esc(text: str) -> str:
 
 def format_telegram(data: dict, period_label: str, today_str: str, now: datetime) -> str:
     weekday_es = {
-        0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
-        4: "viernes", 5: "sabado", 6: "domingo",
+        0: "lunes",
+        1: "martes",
+        2: "miercoles",
+        3: "jueves",
+        4: "viernes",
+        5: "sabado",
+        6: "domingo",
     }
     day_name = weekday_es.get(now.weekday(), "")
 
@@ -399,9 +452,10 @@ def format_telegram(data: dict, period_label: str, today_str: str, now: datetime
     if prs:
         for pr in prs[:8]:
             estado = esc(pr["state"].upper())
-            lines.append(
-                f"\u2022 \\[{estado}\\] [\\#{esc(str(pr['number']))} {esc(pr['title'])}]({pr['url']})"
-            )
+            num = esc(str(pr["number"]))
+            title = esc(pr["title"])
+            url = pr["url"]
+            lines.append(f"\u2022 \\[{estado}\\] [\\#{num} {title}]({url})")
     else:
         lines.append("_Sin PRs_")
     lines.append("")
@@ -411,9 +465,7 @@ def format_telegram(data: dict, period_label: str, today_str: str, now: datetime
     lines.append(f"*Issues cerrados \\({len(issues_c)}\\)*")
     if issues_c:
         for i in issues_c[:5]:
-            lines.append(
-                f"\u2022 [\\#{esc(str(i['number']))} {esc(i['title'])}]({i['url']})"
-            )
+            lines.append(f"\u2022 [\\#{esc(str(i['number']))} {esc(i['title'])}]({i['url']})")
     else:
         lines.append("_Sin issues cerrados_")
     lines.append("")
@@ -426,9 +478,11 @@ def format_telegram(data: dict, period_label: str, today_str: str, now: datetime
     lines.append(f"*PRs abiertos org \\({len(prs_rev)}\\)*")
     if prs_rev:
         for pr in prs_rev[:8]:
-            lines.append(
-                f"\u2022 [\\#{esc(str(pr['number']))} {esc(pr['title'])}]({pr['url']}) \u2014 @{esc(pr['author'])}"
-            )
+            num = esc(str(pr["number"]))
+            title = esc(pr["title"])
+            url = pr["url"]
+            author = esc(pr["author"])
+            lines.append(f"\u2022 [\\#{num} {title}]({url}) \u2014 @{author}")
     else:
         lines.append("_Sin PRs de otros abiertos_")
     lines.append("")
@@ -438,9 +492,7 @@ def format_telegram(data: dict, period_label: str, today_str: str, now: datetime
     lines.append(f"*Issues donde participo \\({len(issues_o)}\\)*")
     if issues_o:
         for i in issues_o[:8]:
-            lines.append(
-                f"\u2022 [\\#{esc(str(i['number']))} {esc(i['title'])}]({i['url']})"
-            )
+            lines.append(f"\u2022 [\\#{esc(str(i['number']))} {esc(i['title'])}]({i['url']})")
     else:
         lines.append("_Sin issues abiertos_")
 
@@ -453,7 +505,7 @@ def format_telegram(data: dict, period_label: str, today_str: str, now: datetime
 def send_telegram(token: str, chat_id: str, text: str) -> bool:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     # Telegram tiene limite de 4096 caracteres por mensaje
-    chunks = [text[i: i + 4000] for i in range(0, len(text), 4000)]
+    chunks = [text[i : i + 4000] for i in range(0, len(text), 4000)]
     success = True
     for chunk in chunks:
         payload = {

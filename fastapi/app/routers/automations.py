@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
 from app.services import processor
 
@@ -29,7 +29,7 @@ async def process(request: ProcessRequest):
         result = await processor.handle(request.action, request.payload)
         return ProcessResponse(success=True, result=result)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error procesando acción {request.action}: {e}")
-        raise HTTPException(status_code=500, detail="Error interno procesando la acción")
+        raise HTTPException(status_code=500, detail="Error interno procesando la acción") from e

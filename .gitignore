@@ -13,6 +13,11 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
 
 # macOS
 .DS_Store

@@ -6,7 +6,6 @@ Para agregar una nueva acción:
 1. Definir la función async en este módulo (o importarla de otro módulo)
 2. Registrarla en el dict ACTION_HANDLERS
 """
-from loguru import logger
 
 
 async def echo(payload: dict) -> dict:
@@ -25,5 +24,7 @@ ACTION_HANDLERS = {
 async def handle(action: str, payload: dict) -> dict:
     handler = ACTION_HANDLERS.get(action)
     if not handler:
-        raise ValueError(f"Acción desconocida: '{action}'. Disponibles: {list(ACTION_HANDLERS.keys())}")
+        raise ValueError(
+            f"Acción desconocida: '{action}'. Disponibles: {list(ACTION_HANDLERS.keys())}"
+        )
     return await handler(payload)
