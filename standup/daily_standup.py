@@ -12,7 +12,6 @@ Uso:
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -49,6 +48,9 @@ def load_config() -> dict:
         "GITHUB_ORG": os.environ.get("GITHUB_ORG", "FARO-DataLab"),
         "GITHUB_USERNAME": os.environ.get("GITHUB_USERNAME", "leonelmarinaro"),
         "GH_BIN": os.environ.get("GH_BIN", "/opt/homebrew/bin/gh"),
+        # Slack — destino principal del daily
+        "SLACK_WEBHOOK_URL": os.environ.get("SLACK_WEBHOOK_URL", ""),
+        # Telegram — disponible para futuros triggers/usos
         "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         "TELEGRAM_CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID", ""),
         "OBSIDIAN_VAULT_PATH": os.environ.get(
@@ -57,10 +59,8 @@ def load_config() -> dict:
         ),
         "TIMEZONE": os.environ.get("TIMEZONE", "America/Argentina/Buenos_Aires"),
     }
-    if not DRY_RUN:
-        missing = [k for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") if not config[k]]
-        if missing:
-            raise ValueError(f"Variables de entorno faltantes: {missing}")
+    if not DRY_RUN and not config["SLACK_WEBHOOK_URL"]:
+        raise ValueError("Variable de entorno faltante: SLACK_WEBHOOK_URL")
     return config
 
 
@@ -407,115 +407,295 @@ def format_markdown(data: dict, period_label: str, today_str: str, now: datetime
 
 
 # ---------------------------------------------------------------------------
-# Formateo — Telegram (MarkdownV2)
+# Formateo — Telegram (HTML)
 # ---------------------------------------------------------------------------
-_TG_SPECIAL = re.compile(r"([_\*\[\]\(\)~`>#\+\-=\|{}.!])")
+_MERGE_PREFIXES = ("Merge pull request", "Merge branch", "Merge remote-tracking")
 
 
-def esc(text: str) -> str:
-    """Escapa caracteres especiales para Telegram MarkdownV2."""
-    return _TG_SPECIAL.sub(r"\\\1", str(text))
+def _is_merge_commit(message: str) -> bool:
+    return any(message.startswith(p) for p in _MERGE_PREFIXES)
+
+
+def _h(text: str) -> str:
+    """Escapa HTML para Telegram."""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _link(text: str, url: str) -> str:
+    return f'<a href="{url}">{_h(text)}</a>'
+
+
+def _group_by_repo(items: list[dict]) -> dict[str, list[dict]]:
+    result: dict[str, list[dict]] = {}
+    for item in items:
+        result.setdefault(item.get("repo", "?"), []).append(item)
+    return result
 
 
 def format_telegram(data: dict, period_label: str, today_str: str, now: datetime) -> str:
     weekday_es = {
-        0: "lunes",
-        1: "martes",
-        2: "miercoles",
-        3: "jueves",
-        4: "viernes",
-        5: "sabado",
-        6: "domingo",
+        0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
+        4: "viernes", 5: "sabado", 6: "domingo",
     }
     day_name = weekday_es.get(now.weekday(), "")
 
-    lines = [
-        f"*Daily Standup \u2014 {esc(today_str)} \\({esc(day_name)}\\)*",
-        "",
-        f"*Ayer hice* \\({esc(period_label)}\\)",
-        "",
-    ]
+    sections: list[str] = []
 
-    # Commits
-    commits = data["commits"]
-    lines.append(f"*Commits \\({len(commits)}\\)*")
-    if commits:
-        for c in commits[:10]:  # Limitar para no saturar el chat
-            lines.append(f"\u2022 `{esc(c['repo'])}` \u2014 {esc(c['message'])}")
-    else:
-        lines.append("_Sin commits_")
-    lines.append("")
+    # --- Encabezado ---
+    sections.append(
+        f"<b>Daily Standup \u2014 {_h(today_str)} ({_h(day_name)})</b>\n"
+        f"<i>Periodo: {_h(period_label)}</i>"
+    )
 
-    # PRs propios
-    prs = data["prs_done"]
-    lines.append(f"*PRs \\({len(prs)}\\)*")
-    if prs:
-        for pr in prs[:8]:
-            estado = esc(pr["state"].upper())
-            num = esc(str(pr["number"]))
-            title = esc(pr["title"])
-            url = pr["url"]
-            lines.append(f"\u2022 \\[{estado}\\] [\\#{num} {title}]({url})")
-    else:
-        lines.append("_Sin PRs_")
-    lines.append("")
-
-    # Issues cerrados
+    # --- Ayer hice ---
+    commits_real = [c for c in data["commits"] if not _is_merge_commit(c["message"])]
+    prs_done = data["prs_done"]
     issues_c = data["issues_closed"]
-    lines.append(f"*Issues cerrados \\({len(issues_c)}\\)*")
-    if issues_c:
-        for i in issues_c[:5]:
-            lines.append(f"\u2022 [\\#{esc(str(i['number']))} {esc(i['title'])}]({i['url']})")
+
+    # Unir commits y PRs por repo para la seccion "ayer"
+    repos_ayer: set[str] = set()
+    for c in commits_real:
+        repos_ayer.add(c["repo"])
+    for pr in prs_done:
+        repos_ayer.add(pr["repo"])
+    for i in issues_c:
+        repos_ayer.add(i["repo"])
+
+    if repos_ayer:
+        ayer_lines = ["<b>Ayer hice</b>"]
+        commits_by_repo = _group_by_repo(commits_real)
+        prs_by_repo = _group_by_repo(prs_done)
+        issues_c_by_repo = _group_by_repo(issues_c)
+
+        for repo in sorted(repos_ayer):
+            repo_lines = [f"\n<b>{_h(repo)}</b>"]
+
+            repo_commits = commits_by_repo.get(repo, [])
+            if repo_commits:
+                repo_lines.append("  <i>commits</i>")
+                for c in repo_commits[:6]:
+                    repo_lines.append(f"  \u2022 {_h(c['message'])}")
+
+            repo_prs = prs_by_repo.get(repo, [])
+            if repo_prs:
+                repo_lines.append("  <i>PRs</i>")
+                for pr in repo_prs[:5]:
+                    estado = pr["state"].upper()
+                    pr_label = f"#{pr['number']} {pr['title']}"
+                    repo_lines.append(f"  \u2022 [{estado}] {_link(pr_label, pr['url'])}")
+
+            repo_issues_c = issues_c_by_repo.get(repo, [])
+            if repo_issues_c:
+                repo_lines.append("  <i>issues cerrados</i>")
+                for i in repo_issues_c[:3]:
+                    i_label = f"#{i['number']} {i['title']}"
+                    repo_lines.append(f"  \u2022 {_link(i_label, i['url'])}")
+
+            ayer_lines.extend(repo_lines)
+
+        sections.append("\n".join(ayer_lines))
     else:
-        lines.append("_Sin issues cerrados_")
-    lines.append("")
+        sections.append("<b>Ayer hice</b>\n<i>Sin actividad en el periodo.</i>")
 
-    lines.append("*Para revisar hoy*")
-    lines.append("")
-
-    # PRs abiertos de la org
+    # --- Para revisar hoy ---
     prs_rev = data["prs_to_review"]
-    lines.append(f"*PRs abiertos org \\({len(prs_rev)}\\)*")
-    if prs_rev:
-        for pr in prs_rev[:8]:
-            num = esc(str(pr["number"]))
-            title = esc(pr["title"])
-            url = pr["url"]
-            author = esc(pr["author"])
-            lines.append(f"\u2022 [\\#{num} {title}]({url}) \u2014 @{author}")
-    else:
-        lines.append("_Sin PRs de otros abiertos_")
-    lines.append("")
-
-    # Issues abiertos
     issues_o = data["issues_open"]
-    lines.append(f"*Issues donde participo \\({len(issues_o)}\\)*")
-    if issues_o:
-        for i in issues_o[:8]:
-            lines.append(f"\u2022 [\\#{esc(str(i['number']))} {esc(i['title'])}]({i['url']})")
-    else:
-        lines.append("_Sin issues abiertos_")
 
-    return "\n".join(lines)
+    revisar_lines = ["<b>Para revisar hoy</b>"]
+
+    if prs_rev:
+        revisar_lines.append(f"  <i>PRs abiertos en la org ({len(prs_rev)})</i>")
+        prs_rev_by_repo = _group_by_repo(prs_rev)
+        for repo in sorted(prs_rev_by_repo):
+            revisar_lines.append(f"  <b>{_h(repo)}</b>")
+            for pr in prs_rev_by_repo[repo][:4]:
+                pr_label = f"#{pr['number']} {pr['title']}"
+                revisar_lines.append(
+                    f"    \u2022 {_link(pr_label, pr['url'])} @{_h(pr['author'])}"
+                )
+    else:
+        revisar_lines.append("  <i>Sin PRs de otros abiertos</i>")
+
+    if issues_o:
+        revisar_lines.append(f"\n  <i>Issues donde participo ({len(issues_o)})</i>")
+        issues_o_by_repo = _group_by_repo(issues_o)
+        for repo in sorted(issues_o_by_repo):
+            revisar_lines.append(f"  <b>{_h(repo)}</b>")
+            for i in issues_o_by_repo[repo][:4]:
+                i_label = f"#{i['number']} {i['title']}"
+                revisar_lines.append(f"    \u2022 {_link(i_label, i['url'])}")
+    else:
+        revisar_lines.append("  <i>Sin issues abiertos asignados</i>")
+
+    sections.append("\n".join(revisar_lines))
+
+    return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Formateo — Slack (Block Kit)
+# ---------------------------------------------------------------------------
+def _sl(text: str, url: str) -> str:
+    """Enlace en Slack mrkdwn: <url|texto>"""
+    return f"<{url}|{text}>"
+
+
+def format_slack(data: dict, period_label: str, today_str: str, now: datetime) -> list[dict]:
+    """Devuelve una lista de bloques Block Kit para Slack."""
+    weekday_es = {
+        0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
+        4: "viernes", 5: "sabado", 6: "domingo",
+    }
+    day_name = weekday_es.get(now.weekday(), "")
+    blocks: list[dict] = []
+
+    def section(text: str) -> dict:
+        return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+
+    def divider() -> dict:
+        return {"type": "divider"}
+
+    # Encabezado
+    blocks.append({
+        "type": "header",
+        "text": {"type": "plain_text", "text": f"Daily Standup — {today_str} ({day_name})"},
+    })
+    blocks.append(section(f"_Periodo: {period_label}_"))
+    blocks.append(divider())
+
+    # --- Ayer hice ---
+    commits_real = [c for c in data["commits"] if not _is_merge_commit(c["message"])]
+    prs_done = data["prs_done"]
+    issues_c = data["issues_closed"]
+
+    repos_ayer: set[str] = set()
+    for c in commits_real:
+        repos_ayer.add(c["repo"])
+    for pr in prs_done:
+        repos_ayer.add(pr["repo"])
+    for i in issues_c:
+        repos_ayer.add(i["repo"])
+
+    blocks.append(section("*Ayer hice*"))
+
+    if repos_ayer:
+        commits_by_repo = _group_by_repo(commits_real)
+        prs_by_repo = _group_by_repo(prs_done)
+        issues_c_by_repo = _group_by_repo(issues_c)
+
+        for repo in sorted(repos_ayer):
+            lines = [f"*{repo}*"]
+
+            repo_commits = commits_by_repo.get(repo, [])
+            if repo_commits:
+                lines.append("  _commits_")
+                for c in repo_commits[:6]:
+                    lines.append(f"  \u2022 {c['message']}")
+
+            repo_prs = prs_by_repo.get(repo, [])
+            if repo_prs:
+                lines.append("  _PRs_")
+                for pr in repo_prs[:5]:
+                    estado = pr["state"].upper()
+                    pr_label = f"#{pr['number']} {pr['title']}"
+                    lines.append(f"  \u2022 [{estado}] {_sl(pr_label, pr['url'])}")
+
+            repo_issues_c = issues_c_by_repo.get(repo, [])
+            if repo_issues_c:
+                lines.append("  _issues cerrados_")
+                for i in repo_issues_c[:3]:
+                    i_label = f"#{i['number']} {i['title']}"
+                    lines.append(f"  \u2022 {_sl(i_label, i['url'])}")
+
+            blocks.append(section("\n".join(lines)))
+    else:
+        blocks.append(section("_Sin actividad en el periodo._"))
+
+    blocks.append(divider())
+
+    # --- Para revisar hoy ---
+    blocks.append(section("*Para revisar hoy*"))
+
+    prs_rev = data["prs_to_review"]
+    if prs_rev:
+        blocks.append(section(f"_PRs abiertos en la org ({len(prs_rev)})_"))
+        prs_rev_by_repo = _group_by_repo(prs_rev)
+        for repo in sorted(prs_rev_by_repo):
+            lines = [f"*{repo}*"]
+            for pr in prs_rev_by_repo[repo][:4]:
+                pr_label = f"#{pr['number']} {pr['title']}"
+                lines.append(f"  \u2022 {_sl(pr_label, pr['url'])} @{pr['author']}")
+            blocks.append(section("\n".join(lines)))
+    else:
+        blocks.append(section("_Sin PRs de otros abiertos_"))
+
+    issues_o = data["issues_open"]
+    if issues_o:
+        blocks.append(section(f"_Issues donde participo ({len(issues_o)})_"))
+        issues_o_by_repo = _group_by_repo(issues_o)
+        for repo in sorted(issues_o_by_repo):
+            lines = [f"*{repo}*"]
+            for i in issues_o_by_repo[repo][:4]:
+                i_label = f"#{i['number']} {i['title']}"
+                lines.append(f"  \u2022 {_sl(i_label, i['url'])}")
+            blocks.append(section("\n".join(lines)))
+    else:
+        blocks.append(section("_Sin issues abiertos asignados_"))
+
+    return blocks
+
+
+def send_slack(webhook_url: str, blocks: list[dict]) -> bool:
+    """Envia el reporte a Slack via Incoming Webhook con Block Kit."""
+    # Slack limita a 50 bloques por mensaje; dividimos si hay mas
+    max_blocks = 50
+    chunks = [blocks[i: i + max_blocks] for i in range(0, len(blocks), max_blocks)]
+    success = True
+    for chunk in chunks:
+        try:
+            resp = requests.post(webhook_url, json={"blocks": chunk}, timeout=15)
+            if not resp.ok:
+                logging.error(f"Slack error {resp.status_code}: {resp.text[:200]}")
+                success = False
+        except requests.RequestException as e:
+            logging.error(f"Slack request failed: {e}")
+            success = False
+    return success
 
 
 # ---------------------------------------------------------------------------
 # Destinos
 # ---------------------------------------------------------------------------
 def send_telegram(token: str, chat_id: str, text: str) -> bool:
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    # Telegram tiene limite de 4096 caracteres por mensaje
-    chunks = [text[i : i + 4000] for i in range(0, len(text), 4000)]
+    """Envia texto en HTML a Telegram, dividiendo por secciones si supera el limite."""
+    api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+    max_len = 4000
+
+    # Dividir por secciones (doble salto) para no cortar entidades HTML
+    raw_sections = text.split("\n\n")
+    chunks: list[str] = []
+    current = ""
+    for section in raw_sections:
+        candidate = f"{current}\n\n{section}".strip() if current else section
+        if len(candidate) <= max_len:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = section
+    if current:
+        chunks.append(current)
+
     success = True
     for chunk in chunks:
         payload = {
             "chat_id": chat_id,
             "text": chunk,
-            "parse_mode": "MarkdownV2",
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
         try:
-            resp = requests.post(url, json=payload, timeout=15)
+            resp = requests.post(api_url, json=payload, timeout=15)
             if not resp.ok:
                 logging.error(f"Telegram error {resp.status_code}: {resp.text[:200]}")
                 success = False
@@ -557,7 +737,7 @@ def main() -> None:
         data = collect_github_data(since, config)
 
         md_content = format_markdown(data, period_label, today_str, now)
-        tg_content = format_telegram(data, period_label, today_str, now)
+        slack_blocks = format_slack(data, period_label, today_str, now)
 
         if DRY_RUN:
             print("\n" + "=" * 60)
@@ -565,23 +745,28 @@ def main() -> None:
             print("=" * 60)
             print(md_content)
             print("\n" + "=" * 60)
-            print("TELEGRAM")
+            print(f"SLACK BLOCKS ({len(slack_blocks)} bloques)")
             print("=" * 60)
-            print(tg_content)
+            for b in slack_blocks:
+                btype = b.get("type")
+                if btype == "header":
+                    print(f"[HEADER] {b['text']['text']}")
+                elif btype == "section":
+                    print(f"[SECTION] {b['text']['text'][:120]}")
+                elif btype == "divider":
+                    print("[---]")
             logging.info("=== Dry-run completado ===")
             return
 
         obsidian_ok = write_obsidian(config["OBSIDIAN_VAULT_PATH"], today_str, md_content)
-        telegram_ok = send_telegram(
-            config["TELEGRAM_BOT_TOKEN"], config["TELEGRAM_CHAT_ID"], tg_content
-        )
+        slack_ok = send_slack(config["SLACK_WEBHOOK_URL"], slack_blocks)
 
         if obsidian_ok:
             logging.info("Obsidian: OK")
-        if telegram_ok:
-            logging.info("Telegram: OK")
+        if slack_ok:
+            logging.info("Slack: OK")
 
-        if not obsidian_ok and not telegram_ok:
+        if not obsidian_ok and not slack_ok:
             logging.critical("Ambos destinos fallaron.")
             sys.exit(1)
 
