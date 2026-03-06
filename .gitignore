@@ -1,0 +1,28 @@
+# Secretos
+.env
+
+# Docker volumes (si se montan localmente)
+postgres_data/
+n8n_data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Standup
+standup/.env
+standup/logs/
+standup/.venv/
